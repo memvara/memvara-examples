@@ -90,4 +90,5 @@ def test_describe_counts_facts(memory):
 def test_parse_when_accepts_dates_and_instants():
     assert parse_when("2026-03-01") == datetime(2026, 3, 1, tzinfo=timezone.utc)
     assert parse_when("2026-03-01T09:00:00Z") == datetime(2026, 3, 1, 9, tzinfo=timezone.utc)
+    assert parse_when("2026-03-01T09:00:00z") == datetime(2026, 3, 1, 9, tzinfo=timezone.utc)
     assert parse_when(None) is None

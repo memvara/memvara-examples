@@ -38,7 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command")
     _add_common(sub.add_parser(
-        "check", help="Test the Memvara connection and the Anthropic credential."))
+        "check", help="Test the Memvara connection and the Anthropic credential."),
+        agent=False)
     for name, cls in AGENTS.items():
         p = sub.add_parser(name, help=cls.description)
         _add_common(p)
@@ -50,11 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_common(p: argparse.ArgumentParser) -> None:
+def _add_common(p: argparse.ArgumentParser, *, agent: bool = True) -> None:
+    """The memory options every command takes, plus the agent options for the ones
+    that start an agent. ``check`` opens a store but never a model."""
     p.add_argument("--user", default=os.environ.get("MEMVARA_USER") or getpass.getuser(),
                    help="Whose memory to open. Default: MEMVARA_USER or your login name.")
     p.add_argument("--local", metavar="PATH", default=None,
                    help="Use a local SQLite store at PATH instead of the hosted deployment.")
+    if not agent:
+        return
     p.add_argument("--model", default=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
                    help=f"Claude model id. Default {DEFAULT_MODEL}.")
     p.add_argument("--quiet", action="store_true",
@@ -67,8 +72,10 @@ def check(args: argparse.Namespace, out: Any = None) -> int:
     ok = True
     try:
         memory = Memory.open(user=args.user, local=args.local)
-        info = memory.describe()
-        memory.close()
+        try:
+            info = memory.describe()
+        finally:
+            memory.close()
         print(f"Memvara: ok. {info['store']}, user {info['user']}, "
               f"{info['claims_visible']} facts visible, extractor {info['extractor']}.",
               file=out)
@@ -78,13 +85,25 @@ def check(args: argparse.Namespace, out: Any = None) -> int:
     except Exception as exc:
         ok = False
         print(f"Memvara: NOT ok. {exc}", file=out)
-    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        print("Anthropic: credential found in the environment.", file=out)
+    if anthropic_credential_present():
+        print("Anthropic: credential found.", file=out)
     else:
-        print("Anthropic: no ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN in the environment. "
-              "The SDK will also try a profile from `ant auth login`; if you have neither, "
-              "export ANTHROPIC_API_KEY before starting an agent.", file=out)
+        print("Anthropic: no credential found. Export ANTHROPIC_API_KEY (or run "
+              "`ant auth login`) before starting an agent.", file=out)
     return 0 if ok else 1
+
+
+def anthropic_credential_present() -> bool:
+    """Whether the Anthropic SDK can find a credential, asked of the SDK itself.
+
+    The client resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and a profile written by
+    ``ant auth login`` in its own order. Constructing it makes no network call, so this
+    reads back what it resolved rather than re-implementing that order here.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic()
+    return bool(client.api_key or client.auth_token)
 
 
 def choose_agent(inp: Any = input, out: Any = sys.stdout) -> str | None:
@@ -111,7 +130,11 @@ def choose_agent(inp: Any = input, out: Any = sys.stdout) -> str | None:
 def make_agent(name: str, args: argparse.Namespace, *, model: Model | None = None,
                out: Any = sys.stdout) -> Agent:
     memory = Memory.open(user=args.user, local=args.local)
-    model = model or ClaudeModel(args.model)
+    try:
+        model = model or ClaudeModel(args.model)
+    except Exception:
+        memory.close()
+        raise
 
     def trace(tool: str, arguments: dict[str, Any], result: str) -> None:
         if getattr(args, "quiet", False):

@@ -40,7 +40,7 @@ def parse_when(value: str | datetime | None) -> datetime | None:
     if value is None or isinstance(value, datetime):
         return value
     text = value.strip()
-    if text.endswith("Z"):
+    if text[-1:] in ("Z", "z"):
         text = text[:-1] + "+00:00"
     parsed = datetime.fromisoformat(text)
     if parsed.tzinfo is None:
@@ -97,9 +97,7 @@ class Memory:
                    label="hosted Memvara (app.memvara.dev)")
 
     def close(self) -> None:
-        close = getattr(self._root, "close", None)
-        if close is not None:
-            close()
+        self._root.close()
 
     # -- what this store is ----------------------------------------------------
 
@@ -114,21 +112,15 @@ class Memory:
             visible = service.get("visible")
             if isinstance(visible, dict):
                 visible = visible.get("claims")
-            return {
-                "store": self.label,
-                "user": self.user,
-                "claims_visible": visible,
-                "extractor": service.get("extractor"),
-                "read_only": service.get("read_only", False),
-            }
-        stats = self._root.stats()
-        return {
-            "store": self.label,
-            "user": self.user,
-            "claims_visible": stats.get("live_claims", stats.get("claims")),
-            "extractor": "none (facts are written as triples)",
-            "read_only": False,
-        }
+            extractor = service.get("extractor")
+            read_only = bool(service.get("read_only", False))
+        else:
+            stats = self._root.stats()
+            visible = stats.get("live_claims", stats.get("claims"))
+            extractor = "none (facts are written as triples)"
+            read_only = False
+        return {"store": self.label, "user": self.user, "claims_visible": visible,
+                "extractor": extractor, "read_only": read_only}
 
     # -- reading ----------------------------------------------------------------
 

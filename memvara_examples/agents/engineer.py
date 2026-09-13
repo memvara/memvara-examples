@@ -71,7 +71,7 @@ class EngineerAgent(Agent):
             component = args.get("component") or project
             when = args.get("decided_on")
             source = box.source_text
-            ended, receipt = memory.set_fact(
+            ended, _ = memory.set_fact(
                 component, args["predicate"], args["value"],
                 true_since=when, source_text=source)
             summary = args["decision"]
@@ -109,7 +109,8 @@ class EngineerAgent(Agent):
             out: dict[str, Any] = {"as_of": at.isoformat(), "narrative": answer.text}
             diverged = []
             for r in answer.diverged:
-                any_claim = (tuple(r.now) + tuple(r.then) + tuple(r.stated))[0]
+                # A diverged reading has a claim in `then` or in `stated`, by definition.
+                any_claim = next(iter(r.then), None) or r.stated[0]
                 diverged.append({
                     "fact": f"{any_claim.subject} {any_claim.predicate}",
                     "true_then_by_todays_record": [c.object for c in r.then],

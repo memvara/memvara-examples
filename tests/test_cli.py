@@ -27,7 +27,15 @@ def test_check_reports_a_local_store(tmp_path, monkeypatch):
     assert cli.check(args, out=out) == 0
     text = out.getvalue()
     assert "Memvara: ok" in text and "0 facts visible" in text
-    assert "no ANTHROPIC_API_KEY" in text
+    assert "Anthropic: no credential found" in text
+
+
+def test_check_sees_a_credential_the_sdk_resolves(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    args = cli.build_parser().parse_args(["check", "--local", str(tmp_path / "m.db")])
+    out = io.StringIO()
+    assert cli.check(args, out=out) == 0
+    assert "Anthropic: credential found" in out.getvalue()
 
 
 def test_chat_runs_a_turn_and_the_standing_command(tmp_path):

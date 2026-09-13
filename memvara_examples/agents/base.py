@@ -31,7 +31,7 @@ class Agent:
         self.memory = memory
         self.model = model
         self.trace = trace
-        self.max_rounds = max_rounds
+        self.max_rounds = max(1, max_rounds)
         self.tools: Toolbox = self.build_tools()
         self.messages: list[dict[str, Any]] = []
 
