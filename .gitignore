@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+*.egg-info/
+local/
+.env
+.env.*
+!.env.example
+.DS_Store
+# A local store created with --local, so a demo never commits somebody's memory.
+*.db
+*.db.*
