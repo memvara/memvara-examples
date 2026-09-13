@@ -62,6 +62,19 @@ def test_set_fact_writes_the_new_value_before_ending_the_old(memory):
     assert [(r["object"], r["state"]) for r in rows] == [("API keys", "ended"), ("OAuth 2.0", "live")]
 
 
+def test_set_fact_with_an_unchanged_value_keeps_the_slot_live(memory):
+    memory.set_fact("checkout", "auth_strategy", "API keys", true_since="2026-02-03")
+    ended, receipt = memory.set_fact("checkout", "auth_strategy", "API keys",
+                                     true_since="2026-02-03")
+    assert ended == [] and receipt.added == []
+    rows = memory.history("checkout", "auth_strategy")
+    assert [(r["object"], r["state"]) for r in rows] == [("API keys", "live")]
+    # The same holds for a built-in single-valued predicate.
+    memory.set_fact("user", "lives_in", "Berlin")
+    memory.set_fact("user", "lives_in", "Berlin")
+    assert [r["state"] for r in memory.history("user", "lives_in")] == ["live"]
+
+
 def test_why_returns_the_source_sentence(memory):
     receipt = memory.remember("user", "works_at", "Acme",
                               source_text="I just started at Acme as a data engineer")
