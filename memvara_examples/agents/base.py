@@ -69,7 +69,16 @@ class Agent:
         """Handle one user message and return the reply."""
         self.tools.source_text = user_text
         system = self.system_prompt(user_text)
+        start = len(self.messages)
         self.messages.append({"role": "user", "content": user_text})
+        try:
+            return self._run(system)
+        except Exception:
+            # A failed turn leaves no half-conversation behind, so the user can retry.
+            del self.messages[start:]
+            raise
+
+    def _run(self, system: str) -> str:
         reply: Completion | None = None
         for _ in range(self.max_rounds):
             reply = self.model.complete(system=system, messages=self.messages,

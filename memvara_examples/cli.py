@@ -151,10 +151,13 @@ def make_agent(name: str, args: argparse.Namespace, *, model: Model | None = Non
 
 def chat(agent: Agent, *, inp: Any = input, out: Any = sys.stdout) -> None:
     """The read-reply loop, until /quit or end of input."""
-    info = agent.memory.describe()
     print(f"\n{agent.name}: {agent.description}", file=out)
-    print(f"Memory: {info['store']}, user {info['user']}, "
-          f"{info['claims_visible']} facts visible.", file=out)
+    try:
+        info = agent.memory.describe()
+        print(f"Memory: {info['store']}, user {info['user']}, "
+              f"{info['claims_visible']} facts visible.", file=out)
+    except Exception as exc:
+        print(f"Memory: could not describe the store yet: {exc}", file=out)
     print("Type /help for commands.\n", file=out)
     while True:
         try:
@@ -169,14 +172,14 @@ def chat(agent: Agent, *, inp: Any = input, out: Any = sys.stdout) -> None:
         if text == "/help":
             print(HELP, file=out)
             continue
-        if text == "/standing":
-            rows = agent.memory.standing()
-            if not rows:
-                print("No standing preferences stored yet.", file=out)
-            for c in rows:
-                print(f"  - {c.predicate}: {c.object}", file=out)
-            continue
         try:
+            if text == "/standing":
+                rows = agent.memory.standing()
+                if not rows:
+                    print("No standing preferences stored yet.", file=out)
+                for c in rows:
+                    print(f"  - {c.predicate}: {c.object}", file=out)
+                continue
             reply = agent.turn(text)
         except Exception as exc:  # keep the session alive; the user can retry
             print(f"error: {type(exc).__name__}: {exc}", file=out)

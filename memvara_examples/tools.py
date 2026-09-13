@@ -104,7 +104,7 @@ def memory_tools(memory: Memory) -> Toolbox:
         receipt = memory.remember(
             args.get("subject", "user"), args["predicate"], args["object"],
             memory_type=args.get("memory_type"), true_since=args.get("true_since"),
-            confidence=float(args.get("confidence", 1.0)),
+            confidence=min(1.0, max(0.0, float(args.get("confidence", 1.0)))),
             source_text=box.source_text)
         out = {"added": [f"{c.subject} {c.predicate} {c.object} (id {c.id})" for c in receipt.added],
                "ended": [f"{c.subject} {c.predicate} {c.object} (id {c.id})" for c in receipt.closed],
@@ -125,7 +125,8 @@ def memory_tools(memory: Memory) -> Toolbox:
          "object": {"type": "string", "description": "The value, as short as it can be."},
          "memory_type": {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
          "true_since": {"type": "string", "description": "ISO-8601 date the fact became true, if before now."},
-         "confidence": {"type": "number", "description": "0 to 1. Lower it for something you inferred rather than were told."}},
+         "confidence": {"type": "number", "minimum": 0, "maximum": 1,
+                        "description": "0 to 1. Lower it for something you inferred rather than were told."}},
         ["predicate", "object"]), remember)
 
     def end(args: dict[str, Any]) -> str:
