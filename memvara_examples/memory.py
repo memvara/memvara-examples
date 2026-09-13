@@ -200,17 +200,30 @@ class Memory:
                  source_text: str | None = None) -> tuple[list[Claim], WriteReceipt]:
         """Replace whatever this fact currently says with ``obj``.
 
-        Every current value in the slot is ended on the world clock at ``true_since``
-        (or now), then the new value is written. This is deterministic whatever the
-        predicate's declared cardinality, which matters for a project vocabulary the
-        store has never seen: an undeclared predicate is multi-valued by default, so a
-        plain ``remember`` would add a second value beside the first instead of replacing
-        it. Returns the values that were ended and the receipt for the new one.
+        The new value is written first, then every other live value in the slot is
+        ended on the world clock at ``true_since`` (or now). Writing first means a
+        failure between the two steps leaves two live values, which history shows and
+        the next call repairs, rather than a slot with no value at all. This is
+        deterministic whatever the predicate's declared cardinality, which matters for a
+        project vocabulary the store has never seen: an undeclared predicate is
+        multi-valued by default, so a plain ``remember`` would add a second value beside
+        the first instead of replacing it. Returns the values that were ended and the
+        receipt for the new one.
         """
         at = parse_when(true_since) or utcnow()
-        ended = list(self._m.forget(subject, predicate, at=at, close="ended"))
+        before = [c for c in self._m.history(subject, predicate) if c.state == "live"]
         receipt = self.remember(subject, predicate, obj, memory_type=memory_type,
                                 true_since=at, source_text=source_text)
+        # Re-asserting the value the slot already holds is a reinforcement: the store
+        # returns nothing added and nothing closed, and the live claim must stay live.
+        keep = ({c.id for c in receipt.added} | {c.id for c in receipt.closed}
+                | {c.id for c in receipt.reinforced})
+        ended = list(receipt.closed)
+        for claim in before:
+            if claim.id in keep or claim.object == obj:
+                continue
+            if self._m.delete(claim.id, at=at, close="ended"):
+                ended.append(claim)
         return ended, receipt
 
     def end(self, claim_id: str, *, at: str | datetime | None = None) -> bool:

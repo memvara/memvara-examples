@@ -167,3 +167,25 @@ def test_engineer_prompt_names_the_project(memory):
     assert '"atlas"' in model.requests[0]["system"]
     names = [t["name"] for t in model.requests[0]["tools"]]
     assert "record_decision" in names and "project_state_at" in names and "memory_why" in names
+
+
+def test_a_failed_model_call_leaves_no_half_turn_behind(memory):
+    class Broken:
+        def complete(self, **kwargs):
+            raise RuntimeError("rate limited")
+
+    agent = AssistantAgent(memory, Broken())
+    try:
+        agent.turn("hello")
+    except RuntimeError:
+        pass
+    assert agent.messages == []
+
+
+def test_confidence_is_clamped_to_the_unit_interval(memory):
+    model = ScriptedModel([
+        [("memory_remember", {"predicate": "likes", "object": "jazz", "confidence": 7})],
+        "ok",
+    ])
+    AssistantAgent(memory, model).turn("I might like jazz")
+    assert memory.search("jazz")[0]["confidence"] == 1.0

@@ -14,11 +14,10 @@ four questions a note in a vector store cannot:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..memory import parse_when
-from ..tools import Toolbox, _schema, memory_tools
+from ..tools import Toolbox, _json, _schema, memory_tools
 from .base import Agent
 
 ROLE = """You keep the engineering record for the project named "{project}". The record
@@ -80,12 +79,12 @@ class EngineerAgent(Agent):
             decided = memory.remember(component, "decided", summary,
                                       memory_type="episodic", true_since=when,
                                       source_text=source)
-            return json.dumps({
+            return _json({
                 "fact_now": f"{component} {args['predicate']} {args['value']}",
                 "previous_values_ended": [f"{c.object} (held from {c.valid_from.date()})"
                                           for c in ended],
                 "decision_recorded": [c.id for c in decided.added],
-            }, indent=1, default=str)
+            })
 
         box.register(_schema(
             "record_decision",
@@ -121,7 +120,7 @@ class EngineerAgent(Agent):
                                "that date. An empty what_we_would_have_said_then means "
                                "nothing had been recorded yet; the facts were written "
                                "down later.")
-            return json.dumps(out, indent=1, default=str)
+            return _json(out)
 
         box.register(_schema(
             "project_state_at",
