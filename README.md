@@ -8,20 +8,54 @@ and a command that starts either one.
 | `assistant` | A personal assistant. It reads what it knows about you before every reply, stores what it learns as structured facts, and corrects a wrong memory the right way: ended if the world moved on, forgotten if the record was never right. |
 | `engineer` | Keeps the record of a software project's decisions. It answers what is true now, what was true before, when that changed, why, and what the record would have said on a past date. |
 
-Both agents talk to Claude through the Anthropic SDK and to Memvara through the `memvara`
-Python library. The memory is real and shared: a fact one session stores, a session next
-week reads.
+Both agents talk to a model through either the Anthropic SDK or the OpenAI SDK, so any
+endpoint that speaks one of those two formats works: Claude, OpenAI, Ollama, vLLM, LM
+Studio, OpenRouter, a company gateway. They talk to Memvara through the `memvara` Python
+library. The memory is real and shared: a fact one session stores, a session next week
+reads.
 
 ## Setup
 
-You need Python 3.10 or newer, an Anthropic API key, and a Memvara credential.
+You need Python 3.10 or newer, a model endpoint, and a Memvara credential.
 
 ```bash
 git clone https://github.com/memvara/memvara-examples && cd memvara-examples
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+### Pick a model endpoint
+
+Four settings choose the endpoint. Each is a flag first, then an `LLM_*` variable, then
+the provider SDK's own variable, which the SDK reads itself.
+
+| Setting | Flag | Variable | Falls back to |
+|---|---|---|---|
+| API format | `--provider anthropic\|openai` | `LLM_PROVIDER` | `anthropic`, or `openai` when only `OPENAI_*` variables are set |
+| Model id | `--model` | `LLM_MODEL` | `claude-opus-5` for anthropic; required for openai |
+| Endpoint URL | `--base-url` | `LLM_BASE_URL` | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`, then the provider |
+| Credential | `--api-key` | `LLM_API_KEY` | `ANTHROPIC_API_KEY` (or an `ant auth login` profile) / `OPENAI_API_KEY` |
+
+Examples:
+
+```bash
+# Claude, straight from Anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI
+export OPENAI_API_KEY=sk-...; export LLM_MODEL=gpt-4.1
+
+# A local model on Ollama (no key needed; a placeholder is sent)
+memvara-examples assistant --provider openai --base-url http://localhost:11434/v1 --model qwen3:8b
+
+# An Anthropic-format gateway
+memvara-examples assistant --base-url https://gateway.example.com --api-key ...
+```
+
+The model needs to support tool calling; the agents do all their memory work through
+tools.
+
+### Pick a memory store
 
 For the Memvara credential, either of these works:
 
@@ -46,9 +80,9 @@ memvara-examples engineer --project checkout
 memvara-examples assistant --local ./memory.db
 ```
 
-Every command takes `--user NAME` (whose memory to open; default your login name),
-`--model ID` (default `claude-opus-5`), `--local PATH` and `--quiet` (hide the tool calls
-the agent makes). Inside a chat, `/standing` shows the preferences memory holds for you and
+Every command takes `--user NAME` (whose memory to open; default your login name), the
+four endpoint flags above, `--local PATH` and `--quiet` (hide the tool calls the agent
+makes). Inside a chat, `/standing` shows the preferences memory holds for you and
 `/quit` leaves.
 
 ## What a session looks like
@@ -96,9 +130,11 @@ engineer> API keys. The record also shows this was written down on 13 September,
 ```
 memvara_examples/
   memory.py          Memory: one user's store, hosted or local, behind the calls an agent makes
-  model.py           ClaudeModel (Anthropic SDK) and ScriptedModel (a replay double for tests)
+  model.py           ClaudeModel (Anthropic SDK), OpenAIModel (OpenAI SDK, any compatible endpoint),
+                     ScriptedModel (a replay double for tests), and how the endpoint is chosen
   tools.py           the memory tools the model can call, and the dispatcher that runs them
-  agents/base.py     the loop: standing preferences + recall into the prompt, tool calls until an answer
+  agents/base.py     the loop: standing preferences + recall into the prompt, tool calls until an answer;
+                     the conversation is kept provider-neutral and each model renders its own wire format
   agents/assistant.py
   agents/engineer.py adds record_decision and project_state_at
   cli.py             the memvara-examples command
@@ -133,7 +169,8 @@ pytest
 
 The tests run both agents with a scripted model against a local store, so they need no API
 key and no network. They check what lands in memory and what the model is handed back, not
-whether a call returned. The Claude path itself is one method, `ClaudeModel.complete`.
+whether a call returned. The two live paths are one method each, `ClaudeModel.complete` and
+`OpenAIModel.complete`; the OpenAI one is also tested against a stub client.
 
 ## License
 

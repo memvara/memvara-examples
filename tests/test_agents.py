@@ -179,7 +179,7 @@ def test_a_failed_model_call_leaves_no_half_turn_behind(memory):
         agent.turn("hello")
     except RuntimeError:
         pass
-    assert agent.messages == []
+    assert agent.transcript == []
 
 
 def test_confidence_is_clamped_to_the_unit_interval(memory):

@@ -2,6 +2,8 @@
 
 import io
 
+import pytest
+
 from memvara_examples import cli
 from memvara_examples.model import ScriptedModel
 
@@ -18,24 +20,51 @@ def test_menu_accepts_a_number_a_name_or_quit():
     assert "1. assistant" in out.getvalue() and "2. engineer" in out.getvalue()
 
 
-def test_check_reports_a_local_store(tmp_path, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    args = cli.build_parser().parse_args(["check"])
-    args.user, args.local = "alice", str(tmp_path / "m.db")
+MODEL_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "OPENAI_BASE_URL",
+              "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY")
+
+
+@pytest.fixture
+def no_model_env(monkeypatch):
+    for name in MODEL_VARS:
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def test_check_reports_a_local_store_and_a_missing_credential(tmp_path, no_model_env):
+    args = cli.build_parser().parse_args(["check", "--local", str(tmp_path / "m.db"),
+                                          "--user", "alice"])
     out = io.StringIO()
-    assert cli.check(args, out=out) == 0
+    assert cli.check(args, out=out) == 1
     text = out.getvalue()
     assert "Memvara: ok" in text and "0 facts visible" in text
-    assert "Anthropic: no credential found" in text
+    assert "Model: NOT ok" in text and "provider anthropic" in text
 
 
-def test_check_sees_a_credential_the_sdk_resolves(tmp_path, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+def test_check_sees_a_credential_the_sdk_resolves(tmp_path, no_model_env):
+    no_model_env.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
     args = cli.build_parser().parse_args(["check", "--local", str(tmp_path / "m.db")])
     out = io.StringIO()
     assert cli.check(args, out=out) == 0
-    assert "Anthropic: credential found" in out.getvalue()
+    assert "Model: ok. provider anthropic, model claude-opus-5" in out.getvalue()
+
+
+def test_check_accepts_an_openai_format_endpoint_from_flags(tmp_path, no_model_env):
+    args = cli.build_parser().parse_args([
+        "check", "--local", str(tmp_path / "m.db"), "--provider", "openai",
+        "--base-url", "http://localhost:11434/v1", "--model", "qwen3:8b"])
+    out = io.StringIO()
+    assert cli.check(args, out=out) == 0
+    assert ("Model: ok. provider openai, model qwen3:8b, endpoint http://localhost:11434/v1"
+            in out.getvalue())
+
+
+def test_check_says_when_an_openai_endpoint_has_no_model_named(tmp_path, no_model_env):
+    no_model_env.setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
+    args = cli.build_parser().parse_args(["check", "--local", str(tmp_path / "m.db")])
+    out = io.StringIO()
+    assert cli.check(args, out=out) == 1
+    assert "Model: NOT ok. No model named for provider openai" in out.getvalue()
 
 
 def test_chat_runs_a_turn_and_the_standing_command(tmp_path):
@@ -56,7 +85,8 @@ def test_chat_runs_a_turn_and_the_standing_command(tmp_path):
     assert "- prefers: tea over coffee" in text
 
 
-def test_main_check_uses_the_parser(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMVARA_USER", "alice")
+def test_main_check_uses_the_parser(tmp_path, no_model_env, capsys):
+    no_model_env.setenv("MEMVARA_USER", "alice")
+    no_model_env.setenv("LLM_API_KEY", "k")
     assert cli.main(["check", "--local", str(tmp_path / "m.db")]) == 0
     assert "Memvara: ok" in capsys.readouterr().out
