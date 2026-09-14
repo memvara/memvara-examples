@@ -66,7 +66,8 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="Use a local SQLite store at PATH instead of the hosted deployment.")
     p.add_argument("--provider", choices=PROVIDERS, default=None,
                    help="Which API format the endpoint speaks. Default: LLM_PROVIDER, else "
-                        "anthropic unless only OpenAI variables are set.")
+                        "openai for a base URL ending in /v1 or when only OpenAI variables "
+                        "are set, else anthropic.")
     p.add_argument("--model", default=None,
                    help="Model id. Default: LLM_MODEL, else claude-opus-5 for anthropic. "
                         "Required for openai.")

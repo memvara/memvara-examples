@@ -19,6 +19,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
+from urllib.parse import urlparse
 
 DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 PROVIDERS = ("anthropic", "openai")
@@ -304,14 +305,20 @@ def resolve_config(*, provider: str | None = None, model: str | None = None,
     ``LLM_BASE_URL`` / ``LLM_API_KEY``, then the provider SDK's own variables
     (``ANTHROPIC_*`` or ``OPENAI_*``), which the SDK reads itself.
 
-    With no provider named anywhere, ``openai`` is chosen when an OpenAI credential or
-    base URL is set and no Anthropic one is; otherwise ``anthropic``. The Anthropic
-    provider has a default model; an OpenAI-format endpoint has none, because every
-    server names its models differently, so ``model`` is required there and
-    :func:`build_model` says so.
+    With no provider named anywhere, the base URL decides first: one whose path ends in
+    ``/v1`` is an OpenAI-format endpoint (``http://localhost:11434/v1``), because the
+    Anthropic SDK appends ``/v1/messages`` itself and so can never work with such a URL.
+    Otherwise ``openai`` is chosen when an OpenAI credential or base URL variable is set
+    and no Anthropic credential is, and ``anthropic`` in every other case. The Anthropic
+    provider has a default model; an OpenAI-format endpoint has none, because every server
+    names its models differently, so ``model`` is required there and :func:`build_model`
+    says so.
     """
     environ = os.environ if env is None else env
     provider = (provider or environ.get("LLM_PROVIDER") or "").strip().lower()
+    base_url = base_url or environ.get("LLM_BASE_URL") or None
+    if not provider and base_url and urlparse(base_url).path.rstrip("/").endswith("/v1"):
+        provider = "openai"
     if not provider:
         has_openai = bool(environ.get("OPENAI_API_KEY") or environ.get("OPENAI_BASE_URL"))
         has_anthropic = bool(environ.get("ANTHROPIC_API_KEY")
@@ -323,7 +330,7 @@ def resolve_config(*, provider: str | None = None, model: str | None = None,
     if model is None and provider == "anthropic":
         model = DEFAULT_CLAUDE_MODEL
     return ModelConfig(provider=provider, model=model,
-                       base_url=base_url or environ.get("LLM_BASE_URL") or None,
+                       base_url=base_url,
                        api_key=api_key or environ.get("LLM_API_KEY") or None)
 
 

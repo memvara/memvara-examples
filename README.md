@@ -31,7 +31,7 @@ the provider SDK's own variable, which the SDK reads itself.
 
 | Setting | Flag | Variable | Falls back to |
 |---|---|---|---|
-| API format | `--provider anthropic\|openai` | `LLM_PROVIDER` | `anthropic`, or `openai` when only `OPENAI_*` variables are set |
+| API format | `--provider anthropic\|openai` | `LLM_PROVIDER` | `openai` for a base URL ending in `/v1` or when only `OPENAI_*` variables are set, otherwise `anthropic` |
 | Model id | `--model` | `LLM_MODEL` | `claude-opus-5` for anthropic; required for openai |
 | Endpoint URL | `--base-url` | `LLM_BASE_URL` | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`, then the provider |
 | Credential | `--api-key` | `LLM_API_KEY` | `ANTHROPIC_API_KEY` (or an `ant auth login` profile) / `OPENAI_API_KEY` |
@@ -45,10 +45,11 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # OpenAI
 export OPENAI_API_KEY=sk-...; export LLM_MODEL=gpt-4.1
 
-# A local model on Ollama (no key needed; a placeholder is sent)
-memvara-examples assistant --provider openai --base-url http://localhost:11434/v1 --model qwen3:8b
+# A local model on Ollama (no key needed; a placeholder is sent). The /v1 ending
+# selects the OpenAI format, so --provider can be left out.
+memvara-examples assistant --base-url http://localhost:11434/v1 --model qwen3:8b
 
-# An Anthropic-format gateway
+# An Anthropic-format gateway (no /v1 ending: the Anthropic SDK adds /v1/messages)
 memvara-examples assistant --base-url https://gateway.example.com --api-key ...
 ```
 

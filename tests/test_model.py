@@ -109,6 +109,17 @@ def test_resolve_config_picks_openai_when_only_openai_variables_are_set():
         resolve_config(provider="gemini", env={})
 
 
+def test_a_base_url_ending_in_v1_selects_the_openai_format_when_no_provider_is_named():
+    flag = resolve_config(base_url="http://localhost:11434/v1", model="qwen", api_key="x", env={})
+    assert flag.provider == "openai"
+    assert resolve_config(env={"LLM_BASE_URL": "https://openrouter.ai/api/v1/"}).provider == "openai"
+    # Even with an Anthropic key in the environment: that SDK cannot serve a /v1 base URL.
+    assert resolve_config(base_url="http://gw/v1", env={"ANTHROPIC_API_KEY": "k"}).provider == "openai"
+    assert resolve_config(base_url="https://gateway.example.com", env={}).provider == "anthropic"
+    # A named provider always wins.
+    assert resolve_config(provider="anthropic", base_url="http://gw/v1", env={}).provider == "anthropic"
+
+
 def test_build_model_needs_a_model_name_for_openai():
     with pytest.raises(ValueError, match="LLM_MODEL"):
         build_model(ModelConfig("openai", None, None, None))
