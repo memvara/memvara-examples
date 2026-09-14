@@ -45,6 +45,9 @@ def test_assistant_prompt_carries_standing_preferences_and_recall(memory):
     system = model.requests[0]["system"]
     assert "prefers: metric units" in system
     assert "Lisbon" in system
+    # The role prompt is its own part, so a provider can cache it; the context is not in it.
+    role, context = model.requests[0]["parts"]
+    assert "Lisbon" not in role and "Lisbon" in context and "Today is" in context
 
 
 def test_assistant_correction_ends_the_old_value_and_can_explain(memory):
@@ -179,7 +182,7 @@ def test_a_failed_model_call_leaves_no_half_turn_behind(memory):
         agent.turn("hello")
     except RuntimeError:
         pass
-    assert agent.messages == []
+    assert agent.transcript == []
 
 
 def test_confidence_is_clamped_to_the_unit_interval(memory):
@@ -189,3 +192,14 @@ def test_confidence_is_clamped_to_the_unit_interval(memory):
     ])
     AssistantAgent(memory, model).turn("I might like jazz")
     assert memory.search("jazz")[0]["confidence"] == 1.0
+
+
+def test_unparseable_tool_arguments_come_back_as_a_clear_error(memory):
+    model = ScriptedModel([
+        [("memory_remember", {"_unparseable_arguments": "{predicate: lives_in"})],
+        "Sorry.",
+    ])
+    AssistantAgent(memory, model).turn("I live in Porto")
+    result = model.requests[1]["messages"][-1]["content"][0]
+    assert result["is_error"] is True and "not valid JSON" in result["content"]
+    assert memory.describe()["claims_visible"] == 0

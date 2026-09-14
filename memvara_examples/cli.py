@@ -9,6 +9,14 @@ and the Anthropic credential without starting anything.
     memvara-examples engineer --project checkout
     memvara-examples check
     memvara-examples assistant --local ./memory.db   # no account, no network
+
+Any Anthropic-format or OpenAI-format endpoint works. Pick it with flags or environment
+variables (flags win): ``--provider anthropic|openai`` (``LLM_PROVIDER``), ``--model``
+(``LLM_MODEL``), ``--base-url`` (``LLM_BASE_URL``), ``--api-key`` (``LLM_API_KEY``).
+Left unset, each falls through to the provider SDK's own variables, ``ANTHROPIC_*`` or
+``OPENAI_*``.
+
+    memvara-examples assistant --provider openai --base-url http://localhost:11434/v1 --model qwen3:8b
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ from . import __version__
 from .agents import AGENTS
 from .agents.base import Agent
 from .memory import Memory
-from .model import DEFAULT_MODEL, ClaudeModel, Model
+from .model import PROVIDERS, Model, ModelConfig, build_model, resolve_config
 
 HELP = """Commands inside a chat:
   /help       show this
@@ -38,8 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command")
     _add_common(sub.add_parser(
-        "check", help="Test the Memvara connection and the Anthropic credential."),
-        agent=False)
+        "check", help="Test the Memvara connection and the model endpoint's credential."))
     for name, cls in AGENTS.items():
         p = sub.add_parser(name, help=cls.description)
         _add_common(p)
@@ -51,19 +58,32 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_common(p: argparse.ArgumentParser, *, agent: bool = True) -> None:
-    """The memory options every command takes, plus the agent options for the ones
-    that start an agent. ``check`` opens a store but never a model."""
+def _add_common(p: argparse.ArgumentParser) -> None:
+    """The memory and model options every command takes."""
     p.add_argument("--user", default=os.environ.get("MEMVARA_USER") or getpass.getuser(),
                    help="Whose memory to open. Default: MEMVARA_USER or your login name.")
     p.add_argument("--local", metavar="PATH", default=None,
                    help="Use a local SQLite store at PATH instead of the hosted deployment.")
-    if not agent:
-        return
-    p.add_argument("--model", default=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
-                   help=f"Claude model id. Default {DEFAULT_MODEL}.")
+    p.add_argument("--provider", choices=PROVIDERS, default=None,
+                   help="Which API format the endpoint speaks. Default: LLM_PROVIDER, else "
+                        "openai for a base URL ending in /v1 or when only OpenAI variables "
+                        "are set, else anthropic.")
+    p.add_argument("--model", default=None,
+                   help="Model id. Default: LLM_MODEL, else claude-opus-5 for anthropic. "
+                        "Required for openai.")
+    p.add_argument("--base-url", default=None,
+                   help="Endpoint URL. Default: LLM_BASE_URL, else the SDK's own "
+                        "(ANTHROPIC_BASE_URL or OPENAI_BASE_URL), else the provider.")
+    p.add_argument("--api-key", default=None,
+                   help="Credential. Default: LLM_API_KEY, else the SDK's own "
+                        "(ANTHROPIC_API_KEY or OPENAI_API_KEY).")
     p.add_argument("--quiet", action="store_true",
                    help="Do not print the tool calls the agent makes.")
+
+
+def model_config(args: argparse.Namespace) -> ModelConfig:
+    return resolve_config(provider=args.provider, model=args.model,
+                          base_url=args.base_url, api_key=args.api_key)
 
 
 def check(args: argparse.Namespace, out: Any = None) -> int:
@@ -85,25 +105,20 @@ def check(args: argparse.Namespace, out: Any = None) -> int:
     except Exception as exc:
         ok = False
         print(f"Memvara: NOT ok. {exc}", file=out)
-    if anthropic_credential_present():
-        print("Anthropic: credential found.", file=out)
-    else:
-        print("Anthropic: no credential found. Export ANTHROPIC_API_KEY (or run "
-              "`ant auth login`) before starting an agent.", file=out)
+    try:
+        config = model_config(args)
+        model = build_model(config)
+        if model.credential_present():
+            print(f"Model: ok. {config.describe()}, credential found.", file=out)
+        else:
+            ok = False
+            print(f"Model: NOT ok. {config.describe()}, but no credential was found. "
+                  "Pass --api-key, or set LLM_API_KEY, ANTHROPIC_API_KEY or "
+                  "OPENAI_API_KEY.", file=out)
+    except Exception as exc:
+        ok = False
+        print(f"Model: NOT ok. {exc}", file=out)
     return 0 if ok else 1
-
-
-def anthropic_credential_present() -> bool:
-    """Whether the Anthropic SDK can find a credential, asked of the SDK itself.
-
-    The client resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and a profile written by
-    ``ant auth login`` in its own order. Constructing it makes no network call, so this
-    reads back what it resolved rather than re-implementing that order here.
-    """
-    import anthropic
-
-    client = anthropic.Anthropic()
-    return bool(client.api_key or client.auth_token)
 
 
 def choose_agent(inp: Any = input, out: Any = sys.stdout) -> str | None:
@@ -131,7 +146,7 @@ def make_agent(name: str, args: argparse.Namespace, *, model: Model | None = Non
                out: Any = sys.stdout) -> Agent:
     memory = Memory.open(user=args.user, local=args.local)
     try:
-        model = model or ClaudeModel(args.model)
+        model = model or build_model(model_config(args))
     except Exception:
         memory.close()
         raise

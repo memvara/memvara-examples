@@ -62,6 +62,9 @@ class Toolbox:
         handler = self._handlers.get(name)
         if handler is None:
             return f"Unknown tool: {name}", True
+        if "_unparseable_arguments" in arguments:
+            return ("The arguments for this call were not valid JSON, so it was not run: "
+                    f"{arguments['_unparseable_arguments'][:200]}"), True
         try:
             return handler(arguments), False
         except Exception as exc:  # the model gets the error text and can recover

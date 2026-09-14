@@ -5,13 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "memvara-examples"
 version = "0.1.0"
-description = "Two working AI agents that keep long-term memory in Memvara, and a CLI to start them."
+description = "Two working AI agents that keep long-term memory in Memvara, on any Anthropic-format or OpenAI-format model endpoint, and a CLI to start them."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 dependencies = [
     "memvara[cloud]>=0.13.0",
     "anthropic>=1.5",
+    "openai>=1.40",
 ]
 
 [project.optional-dependencies]
