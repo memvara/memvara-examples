@@ -46,8 +46,19 @@ class Completion:
 
 
 class Model(Protocol):
-    def complete(self, *, system: str, transcript: list[dict[str, Any]],
+    def complete(self, *, system: str | list[str], transcript: list[dict[str, Any]],
                  tools: list[dict[str, Any]]) -> Completion: ...
+
+
+def system_parts(system: str | list[str]) -> list[str]:
+    """The system prompt as a list of parts, stable part first.
+
+    An agent passes the role prompt, which never changes, as the first part and the
+    per-turn context (standing preferences, recall, today's date) after it. A provider
+    that can cache a prompt prefix caches only the first part, because a cache marker on
+    text that changes every turn pays the cache-write price and is never read back.
+    """
+    return [system] if isinstance(system, str) else [part for part in system if part]
 
 
 # -- the neutral transcript and its two renderings -------------------------------------
@@ -119,13 +130,16 @@ class ClaudeModel:
         """Whether the SDK resolved a credential, asked of the SDK itself."""
         return bool(self._client.api_key or self._client.auth_token)
 
-    def complete(self, *, system: str, transcript: list[dict[str, Any]],
+    def complete(self, *, system: str | list[str], transcript: list[dict[str, Any]],
                  tools: list[dict[str, Any]]) -> Completion:
+        parts = system_parts(system)
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": parts[0],
+                                         "cache_control": {"type": "ephemeral"}}]
+        blocks += [{"type": "text", "text": part} for part in parts[1:]]
         response = self._client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=[{"type": "text", "text": system,
-                     "cache_control": {"type": "ephemeral"}}],
+            system=blocks,
             tools=tools,
             messages=to_anthropic(transcript),
         )
@@ -158,6 +172,9 @@ class OpenAIModel:
                  client: Any = None) -> None:
         self.model = model
         self.max_tokens = max_tokens
+        #: OpenAI's own API wants `max_completion_tokens`; some compatible servers only
+        #: know the older `max_tokens`. The first 400 naming the parameter switches.
+        self._token_param = "max_completion_tokens"
         if client is not None:
             self._client = client
             return
@@ -172,15 +189,28 @@ class OpenAIModel:
     def credential_present(self) -> bool:
         return bool(self._client.api_key)
 
-    def complete(self, *, system: str, transcript: list[dict[str, Any]],
+    def _create(self, **kwargs: Any) -> Any:
+        try:
+            return self._client.chat.completions.create(
+                **{self._token_param: self.max_tokens}, **kwargs)
+        except Exception as exc:
+            if (getattr(exc, "status_code", None) == 400
+                    and self._token_param in str(exc)
+                    and self._token_param == "max_completion_tokens"):
+                self._token_param = "max_tokens"
+                return self._client.chat.completions.create(
+                    **{self._token_param: self.max_tokens}, **kwargs)
+            raise
+
+    def complete(self, *, system: str | list[str], transcript: list[dict[str, Any]],
                  tools: list[dict[str, Any]]) -> Completion:
         kwargs: dict[str, Any] = {}
         if tools:
             kwargs["tools"] = [openai_tool(t) for t in tools]
-        response = self._client.chat.completions.create(
+        response = self._create(
             model=self.model,
-            max_completion_tokens=self.max_tokens,
-            messages=[{"role": "system", "content": system}, *to_openai(transcript)],
+            messages=[{"role": "system", "content": "\n\n".join(system_parts(system))},
+                      *to_openai(transcript)],
             **kwargs,
         )
         choice = response.choices[0]
@@ -197,7 +227,15 @@ class OpenAIModel:
             raw_calls.append({"id": tc.id, "type": "function",
                               "function": {"name": tc.function.name,
                                            "arguments": arguments}})
-        content: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
+        refusal = getattr(message, "refusal", None)
+        if refusal and not calls:
+            return Completion(text=f"The model declined to answer ({refusal}).",
+                              content={"role": "assistant", "content": refusal},
+                              stop_reason="refusal")
+        # The spec wants content null, not empty, on an assistant message that only
+        # carries tool calls; some servers reject the empty string.
+        content: dict[str, Any] = {"role": "assistant",
+                                   "content": message.content or (None if raw_calls else "")}
         if raw_calls:
             content["tool_calls"] = raw_calls
         return Completion(text=message.content or "", tool_calls=calls, content=content,
@@ -223,9 +261,11 @@ class ScriptedModel:
     def credential_present(self) -> bool:
         return True
 
-    def complete(self, *, system: str, transcript: list[dict[str, Any]],
+    def complete(self, *, system: str | list[str], transcript: list[dict[str, Any]],
                  tools: list[dict[str, Any]]) -> Completion:
-        self.requests.append({"system": system, "messages": to_anthropic(transcript),
+        self.requests.append({"system": "\n\n".join(system_parts(system)),
+                              "parts": system_parts(system),
+                              "messages": to_anthropic(transcript),
                               "tools": tools})
         if not self._script:
             raise AssertionError("ScriptedModel ran out of scripted replies")

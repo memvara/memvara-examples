@@ -146,9 +146,10 @@ agent can get them wrong:
 1. **Facts are written as triples**, never as prose. A hosted deployment may have no
    extraction model, and a paragraph it does not recognise is accepted and stored as
    nothing. `memory_remember` takes a subject, a predicate and an object.
-2. **A new value ends the old one, it does not overwrite it.** `set_fact` closes every
-   current value in the slot on the world clock and then writes the new one, so
-   `memory_history` shows both with the interval each held. This is done explicitly rather
+2. **A new value ends the old one, it does not overwrite it.** `set_fact` writes the new
+   value, then closes every other current value in the slot on the world clock, so
+   `memory_history` shows both with the interval each held. Writing first means a failure
+   between the two steps leaves two live values rather than none. This is done explicitly rather
    than relying on the predicate's declared cardinality, because a project vocabulary the
    store has never seen (`auth_strategy`, `deploy_target`) is multi-valued by default.
 3. **Ending and forgetting mean different things.** `memory_end` says the fact was true and

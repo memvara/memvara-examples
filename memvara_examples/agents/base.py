@@ -48,15 +48,19 @@ class Agent:
 
     # The parts every agent shares.
 
-    def system_prompt(self, user_text: str) -> str:
-        """The role prompt, then the user's standing preferences, then recall.
+    def system_prompt(self, user_text: str) -> list[str]:
+        """Two parts: the role prompt, which never changes, and this turn's context.
+
+        The context is the user's standing preferences, recall on the message, and
+        today's date. Keeping it in a separate part lets a provider cache the role prompt
+        without paying to cache text that changes every turn.
 
         Standing preferences come from a dedicated read rather than a search, because a
         rule stored at full confidence can score zero against a question it has nothing
         to do with and never reach the model. Recall is run on the user's message so the
         model starts each turn with what is already known about the topic.
         """
-        parts = [self.role_prompt()]
+        parts: list[str] = []
         standing = self.memory.standing()
         if standing:
             lines = "\n".join(f"- {c.predicate}: {c.object}" for c in standing)
@@ -66,10 +70,9 @@ class Agent:
         if notes.strip():
             parts.append("What is already known that may bear on this message (recorded "
                          f"earlier, possibly by another session):\n{notes}")
-        # Last, so the stable role prompt stays a cacheable prefix. Without it a model
-        # resolves "last week" against whatever year it was trained in.
+        # Without the date a model resolves "last week" against the year it was trained in.
         parts.append(f"Today is {datetime.now(timezone.utc).date().isoformat()} (UTC).")
-        return "\n\n".join(parts)
+        return [self.role_prompt(), "\n\n".join(parts)]
 
     def turn(self, user_text: str) -> str:
         """Handle one user message and return the reply."""

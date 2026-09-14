@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from memvara_examples.model import (Completion, ModelConfig, OpenAIModel, ToolCall,
+from memvara_examples.model import (ClaudeModel, Completion, ModelConfig, OpenAIModel,
+                                    ToolCall,
                                     build_model, openai_tool, resolve_config,
                                     to_anthropic, to_openai)
 
@@ -70,6 +71,7 @@ def test_openai_model_turns_tool_calls_into_completions_and_echoes_them_back():
                            tools=tools)
     assert reply.tool_calls == [ToolCall("call_1", "memory_recall", {"query": "home"})]
     assert reply.content["tool_calls"][0]["function"]["name"] == "memory_recall"
+    assert reply.content["content"] is None
     sent = client.calls[0]
     assert sent["messages"][0] == {"role": "system", "content": "sys"}
     assert sent["tools"][0]["type"] == "function"
@@ -114,3 +116,63 @@ def test_build_model_needs_a_model_name_for_openai():
     assert isinstance(model, OpenAIModel) and model.credential_present()
     claude = build_model(ModelConfig("anthropic", "claude-opus-5", "http://gateway", "k"))
     assert claude.provider == "anthropic" and claude.credential_present()
+
+
+def test_claude_caches_only_the_stable_part_of_the_system_prompt():
+    recorded = {}
+
+    class Messages:
+        def create(self, **kwargs):
+            recorded.update(kwargs)
+            return SimpleNamespace(stop_reason="end_turn",
+                                   content=[SimpleNamespace(type="text", text="hi")])
+
+    model = ClaudeModel("claude-opus-5", api_key="k")
+    model._client = SimpleNamespace(messages=Messages())
+    reply = model.complete(system=["role prompt", "recall and date"],
+                           transcript=[{"role": "user", "content": "x"}], tools=[])
+    assert reply.text == "hi"
+    assert recorded["system"] == [
+        {"type": "text", "text": "role prompt", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "recall and date"}]
+
+
+class TooOld(Exception):
+    status_code = 400
+
+
+def test_openai_model_falls_back_to_max_tokens_once_a_server_rejects_the_new_name():
+    message = SimpleNamespace(content="ok", tool_calls=None)
+    client = StubClient(message)
+    real = client.chat.completions.create
+
+    def create(**kwargs):
+        if "max_completion_tokens" in kwargs:
+            raise TooOld("Unrecognized request argument: max_completion_tokens")
+        return real(**kwargs)
+
+    client.chat.completions.create = create
+    model = OpenAIModel("m", client=client)
+    for _ in range(2):
+        assert model.complete(system="s", transcript=[{"role": "user", "content": "x"}],
+                              tools=[]).text == "ok"
+    assert [("max_tokens" in c) for c in client.calls] == [True, True]
+
+
+def test_openai_model_does_not_swallow_other_bad_requests():
+    client = StubClient(SimpleNamespace(content="ok", tool_calls=None))
+
+    def create(**kwargs):
+        raise TooOld("model not found")
+
+    client.chat.completions.create = create
+    with pytest.raises(TooOld):
+        OpenAIModel("m", client=client).complete(
+            system="s", transcript=[{"role": "user", "content": "x"}], tools=[])
+
+
+def test_openai_refusal_is_reported_rather_than_returned_empty():
+    message = SimpleNamespace(content=None, tool_calls=None, refusal="not allowed")
+    reply = OpenAIModel("m", client=StubClient(message)).complete(
+        system="s", transcript=[{"role": "user", "content": "x"}], tools=[])
+    assert reply.stop_reason == "refusal" and "not allowed" in reply.text
